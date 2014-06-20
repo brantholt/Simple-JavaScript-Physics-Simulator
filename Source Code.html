@@ -1,0 +1,323 @@
+<!-- Brant Holt 2014 -->
+
+<!--  Simple JavaScript Physics Simulator (No Canvas)
+
+Example of giving html elements gravity, relative to the page's dimensions, with the formula for gravity converted from meters per second per second to inches in pixels per second per second(Using 220 PPI[Apple Retina Screen, MacBook 15"]). NO use of HTML5 Canvas. Built from the ground up with JavaScript using RequestAnimationFrame API only. (only available in certain browsers [tested in Safari, Chrome, iOS]).
+-->
+
+<!doctype html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<title>Simple Physics Simulator</title>
+<style type="text/css">
+html,body{
+margin:0;
+padding:0;
+width:100%;
+height:100%;
+overflow:hidden;
+background-color:white;
+white-space:nowrap;
+}
+
+#throwArea{
+	display:block;
+	height:100%;
+	width:100%;
+	background-color:white;
+	overflow:hidden;
+}
+
+#object{
+	position:absolute;
+	z-index:2;
+	left:0px;
+	top:0px;
+	height:75px;
+	width:75px;
+	display:inline-block;
+	background-color:red;
+	text-align:center;
+	cursor:pointer;
+	border-radius:100%;
+	-webkit-border-radius:100%;
+}
+
+#ground{
+	position:absolute;
+	bottom:0;
+	z-index:1;
+	height:10px;
+	width:inherit;
+	display:block;
+	background-color:black;
+	cursor:pointer;
+}
+</style>
+<script type="application/javascript" src="script/fastclick.min.js"></script>
+<script type="text/javascript">
+var windowHeight = 0, windowWidth = 0;
+var frame, ground, object;
+var objectHeight = 0, objectWidth = 0, objectTop = 0, objectLeft = 0, groundHeight = 0;
+var highestPosition = 0;
+var xTime = 0, yTime;
+var PPI = 221;
+var gravity = 42663/10;
+var COR = .5;
+var stopAnim = true;
+var fallbackAnimInt = null, fallbackFPS = 1000.0 / 60.0;
+var dragStarted = false;
+var currentX = 0, currentY = 0;
+var horizontalV = 0, verticalV = 0;
+var lastPoll = 0;
+
+window.onload = function(){
+	FastClick.attach(document.body);
+	windowHeight = window.innerHeight;
+	windowWidth = window.innerWidth;
+	frame = d("throwArea"); 
+	ground = d("ground");
+	object = d("object");
+	objectHeight = trimUnit(computedStyle(object,"height"),"px");
+	objectWidth = trimUnit(computedStyle(object,"width"),"px");
+	groundHeight = trimUnit(computedStyle(ground,"height"),"px");
+	checkEventHandlers();
+	//
+	setTimeout(startAnimation,750);
+	//
+}
+
+function checkEventHandlers(){
+	var startEvent, moveEvent, stopEvent, eventIdentifier;
+	if ("ontouchstart" in document.documentElement) {
+  		startEvent = "touchstart";
+		moveEvent = "touchmove";
+		stopEvent = "touchend";
+		eventIdentifier = "touch";
+	} else {
+		startEvent = "mousedown";
+		moveEvent = "mousemove";
+		stopEvent = "mouseup";
+		eventIdentifier = "mouse";
+	}
+	addEventHandlers(startEvent,moveEvent,stopEvent,eventIdentifier);
+}
+
+function addEventHandlers(startEvent,moveEvent,stopEvent,eventIdentifier){
+	//====================START-EVENT=====================//
+	document.addEventListener(startEvent, function(e){
+		e.preventDefault();
+		stopAnimation();
+		dragStarted = true;
+		var eventObject = e;
+		if(eventIdentifier === "touch"){
+			eventObject = e.changedTouches[0];
+		}
+		startCommands(eventObject.clientX,eventObject.clientY);
+	}, false);
+	//====================MOVE-EVENT======================//
+	document.addEventListener(moveEvent, function(e){
+		e.preventDefault();
+		if(dragStarted){
+			var eventObject = e;
+			if(eventIdentifier === "touch"){
+				eventObject = e.changedTouches[0];
+			}
+			moveCommands(eventObject.clientX,eventObject.clientY);
+		}
+	}, false);
+	//====================STOP-EVENT=======================//
+	document.addEventListener(stopEvent, function(e){
+		e.preventDefault();
+		dragStarted = false;
+		startAnimation();
+	}, false);
+}
+
+function startCommands(x,y){
+	var d = new Date();
+	lastPoll = d.getTime();
+	horizontalV = 0;
+	verticalV = 0;
+	var xPos = x - (+objectWidth*.5), yPos = y - (+objectHeight*.5);
+	if(x <= (+objectWidth*.5)) {
+		xPos = 0;
+	} else if(x >= (+windowWidth - (+objectWidth*.5))){
+		xPos = +windowWidth - (+objectWidth);
+	}
+	if(y <= (+objectHeight*.5)) {
+		yPos = 0;
+	} else if(y >= (+windowHeight - (+groundHeight + (+objectHeight*.5)))){
+		yPos = +windowHeight - (+groundHeight + +objectHeight);
+	}
+	currentX = xPos;
+	currentY = yPos;
+	moveObject(currentX,currentY);
+}
+
+function moveCommands(x,y){
+	var d = new Date();
+	var currentPoll = d.getTime();
+	var xPos = x - (+objectWidth*.5), yPos = y - (+objectHeight*.5);
+	if(x <= (+objectWidth*.5)) {
+		xPos = 0;
+	} else if(x >= (+windowWidth - (+objectWidth*.5))){
+		xPos = +windowWidth - (+objectWidth);
+	}
+	if(y <= (+objectHeight*.5)) {
+		yPos = 0;
+	} else if(y >= (+windowHeight - (+groundHeight + (+objectHeight*.5)))){
+		yPos = +windowHeight - (+groundHeight + +objectHeight);
+	}
+	horizontalV = getHorizontalV(lastPoll,currentPoll,currentX,xPos);
+	verticalV = getVerticalV(lastPoll,currentPoll,currentY,yPos);
+	currentX = xPos;
+	currentY = yPos;
+	lastPoll = currentPoll;
+	moveObject(currentX,currentY);
+}
+
+function getHorizontalV(startT,endT,startX,endX){ //d=r*t ~~ r=d/t
+	var coordOffset = endX - startX;
+	var timeOffset = (endT - startT)/1000;
+	return coordOffset/timeOffset;
+}
+
+function getVerticalV(startT,endT,startY,endY){
+	var coordOffset = endY - startY;
+	var timeOffset = (endT - startT)/1000;
+	return coordOffset/timeOffset;
+}
+
+var mainloop = function() {
+	var position = updatePhysics();
+	moveObject(position["x"],position["y"]);
+};
+
+var animFrame = window.requestAnimationFrame		||
+				window.webkitRequestAnimationFrame	||
+				window.mozRequestAnimationFrame		||
+				window.oRequestAnimationFrame		||
+				window.msRequestAnimationFrame		||
+				null;
+
+var recursiveAnim = function() {
+	if(!stopAnim){
+		mainloop();
+		animFrame(recursiveAnim);
+	}
+};
+
+function startAnimation(){
+	highestPosition = 0;
+	objectTop = trimUnit(computedStyle(object,"top"),"px");
+	objectLeft = trimUnit(computedStyle(object,"left"),"px");
+	stopAnim = false;
+	var d = new Date();
+	xTime = d.getTime();
+	yTime = d.getTime();
+	if(animFrame !== null) {	// start the mainloop with requestAnimationFrame
+		animFrame(recursiveAnim);
+	} else {					// start the mainloop with fallback setInterval
+		fallbackAnimInt = setInterval(mainloop,fallbackFPS);
+	}
+}
+
+function stopAnimation(){
+	stopAnim = true;
+	if(fallbackAnimInt !== null){
+		clearInterval(fallbackAnimInt);
+	}
+}
+
+function updatePhysics(){
+	var verticalDistance = 0, horizontalDistance = 0, boundaryDistance = 0, x = 0, y = 0, calcX = 0, calcY = 0;
+	var position = new Object();
+	var d = new Date();
+	var currentAnimTime = d.getTime();
+	var xTimeSinceStarted = (+currentAnimTime - +xTime)/1000;
+	var yTimeSinceStarted = (+currentAnimTime - +yTime)/1000;
+	calcX = Math.round(horizontalV*xTimeSinceStarted) + +objectLeft;
+	calcY = Math.round(((verticalV*yTimeSinceStarted) + .5 * gravity * Math.pow(yTimeSinceStarted,2)) + +objectTop);
+	verticalDistance = +windowHeight - (+objectHeight + +groundHeight + +calcY);
+	horizontalDistance = +windowWidth - (+objectWidth + +calcX);
+	if(horizontalDistance <= 0){ //object WILL be touching left wall
+		calcX = +windowWidth - +objectWidth;
+		horizontalV = 0;
+		objectLeft = calcX;
+		xTime = currentAnimTime;
+	} else if (calcX <= 0){ //object WILL be touching right wall
+		calcX = 0;
+		horizontalV = 0;
+		objectLeft = calcX;
+		xTime = currentAnimTime;
+	}
+	if(verticalDistance <= 0){ //object WILL be touching or under ground
+		calcY = +windowHeight - (+groundHeight + +objectHeight);
+		verticalV = 0;
+		objectTop = calcY;
+		yTime = currentAnimTime;
+		/* Bounce: Work in progress */
+		var bounceHeight = Math.round((Math.pow(COR,2))*highestPosition);
+		verticalV = Math.round((bounceHeight - (.5 * gravity * Math.pow(yTimeSinceStarted,2)))/yTimeSinceStarted);
+		console.log(bounceHeight);
+		/* */
+		if(verticalV >= 0){
+			stopAnimation();
+		}
+	} else if (calcY <= 0){ //object WILL be touching or above ceiling
+		calcY = 0;
+		verticalV = 0;
+		objectTop = calcY;
+		yTime = currentAnimTime;
+	}
+	x = calcX;
+	y = calcY;
+	if((+windowHeight - (+y + +groundHeight + +objectHeight)) > highestPosition){
+		highestPosition = +windowHeight - (+y + +groundHeight + +objectHeight);
+	}
+	position["x"] = x;
+	position["y"] = y;
+	return position;
+}
+
+function moveObject(posX,posY){
+	object.style.left = posX + "px";
+	object.style.top = posY + "px";
+	//show fps for last sec every second
+}
+
+function computedStyle (el,style) {
+	var cs;
+	if (typeof el.currentStyle != 'undefined'){
+		cs = el.currentStyle;
+	} else {
+		cs = document.defaultView.getComputedStyle(el,null);
+	}
+	return cs[style];
+}
+
+function trimUnit(s,u){
+	return s.slice(0,s.lastIndexOf(u))
+}
+
+function d(a){return document.getElementById(a);}
+</script>
+</head>
+
+<body>
+	<div id="throwArea">
+    <!-- options:
+    	size: w and h
+        acceleration of gravity
+        html elements
+        -->
+    	<div id="object"><div style="margin-top:20px;">Throw<br />Me</div></div>
+        <div id="ground"></div>
+	</div>
+</body>
+</html>
